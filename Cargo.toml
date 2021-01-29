@@ -5,6 +5,7 @@ authors = ["Eduard-Mihai Burtescu <eddyb@lyken.rs>"]
 edition = "2018"
 repository = "https://github.com/eddyb/glOOF"
 license = "MIT/Apache-2.0"
+description = "glOOF: an OpenGL implementation experiment"
 readme = "README.md"
 
 [lib]
