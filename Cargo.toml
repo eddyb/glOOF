@@ -3,7 +3,7 @@ name = "gloof"
 version = "0.1.0"
 authors = ["Eduard-Mihai Burtescu <eddyb@lyken.rs>"]
 edition = "2018"
-repository = "https://github.com/eddyb/gloof"
+repository = "https://github.com/eddyb/glOOF"
 license = "MIT/Apache-2.0"
 readme = "README.md"
 
