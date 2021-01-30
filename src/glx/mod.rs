@@ -67,5 +67,5 @@ impl Context {
 
 struct Surface {
     // FIXME(eddyb) encapsulate this better.
-    drawable: x11::glx::GLXDrawable,
+    drawable: x11_dl::glx::GLXDrawable,
 }

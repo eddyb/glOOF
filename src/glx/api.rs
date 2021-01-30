@@ -1,12 +1,14 @@
+use lazy_static::lazy_static;
 use libc::{c_char, c_int, c_uchar, free, malloc};
 use std::ffi::{CStr, CString};
 use std::sync::Arc;
 use std::{iter, mem, ptr};
-use x11::glx::{GLXContext, GLXDrawable};
-use x11::xlib::{
-    Bool, Display, False, InputOutput, True, XDefaultVisual, XFetchName, XMatchVisualInfo,
-    XStoreName, XVisualInfo,
-};
+use x11_dl::glx::{GLXContext, GLXDrawable};
+use x11_dl::xlib::{Bool, Display, False, InputOutput, True, XVisualInfo, Xlib};
+
+lazy_static! {
+    static ref XLIB: Xlib = Xlib::open().unwrap();
+}
 
 macro_rules! visual_attribs {
     (@type bool) => {bool};
@@ -31,7 +33,7 @@ macro_rules! visual_attribs {
                         attrib
                     };
                     Some(match next() {
-                        $(x11::glx::$name => visual_attribs!(@parse(next) $name: $ty),)*
+                        $(x11_dl::glx::$name => visual_attribs!(@parse(next) $name: $ty),)*
                         attrib => panic!("VisualAttrib::parse_list: invalid attribute {}", attrib),
                     })
                 })
@@ -117,14 +119,14 @@ pub unsafe extern "C" fn glXChooseVisual(
 
     // HACK(eddyb) `XMatchVisualInfo` returns 0 (failure) for some reason.
     if false {
-        if XMatchVisualInfo(dpy, 0, 24, InputOutput, visual_info) == 0 {
+        if (XLIB.XMatchVisualInfo)(dpy, 0, 24, InputOutput, visual_info) == 0 {
             free(visual_info as *mut _);
             return ptr::null_mut();
         }
         eprintln!("visual_info = {:#?}", *visual_info);
     } else {
         visual_info.write(XVisualInfo {
-            visual: XDefaultVisual(dpy, 0),
+            visual: (XLIB.XDefaultVisual)(dpy, 0),
             visualid: 0,
             screen: 0,
             depth: 0,
@@ -173,14 +175,14 @@ pub unsafe extern "C" fn glXMakeCurrent(
     }
 
     let mut name = ptr::null_mut();
-    XFetchName(dpy, drawable, &mut name);
+    (XLIB.XFetchName)(dpy, drawable, &mut name);
     if !name.is_null() {
         let new_name = CString::new(format!(
             "{} [glOOF]",
             CStr::from_ptr(name).to_str().unwrap()
         ))
         .unwrap();
-        XStoreName(dpy, drawable, new_name.as_ptr());
+        (XLIB.XStoreName)(dpy, drawable, new_name.as_ptr());
         free(name as *mut _);
     }
 
@@ -210,7 +212,7 @@ pub unsafe extern "C" fn glXGetProcAddressARB(
 
 #[no_mangle]
 pub unsafe extern "C" fn glXSwapBuffers(dpy: *mut Display, drawable: GLXDrawable) {
-    use x11::xlib::*;
+    use x11_dl::xlib::*;
 
     // eprintln!("glXSwapBuffers(drawable={:#x})", drawable);
 
@@ -222,8 +224,8 @@ pub unsafe extern "C" fn glXSwapBuffers(dpy: *mut Display, drawable: GLXDrawable
         }
     }
 
-    XClearWindow(dpy, drawable);
-    let gc = XCreateGC(
+    (XLIB.XClearWindow)(dpy, drawable);
+    let gc = (XLIB.XCreateGC)(
         dpy,
         drawable,
         GCForeground as u64,
@@ -247,7 +249,7 @@ pub unsafe extern "C" fn glXSwapBuffers(dpy: *mut Display, drawable: GLXDrawable
                         match last_point {
                             None => last_point = Some(p),
                             Some(last) => {
-                                XDrawLine(
+                                (XLIB.XDrawLine)(
                                     dpy,
                                     drawable,
                                     gc,
@@ -267,5 +269,5 @@ pub unsafe extern "C" fn glXSwapBuffers(dpy: *mut Display, drawable: GLXDrawable
         }
     });
 
-    XFlush(dpy);
+    (XLIB.XFlush)(dpy);
 }
