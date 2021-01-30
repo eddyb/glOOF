@@ -37,12 +37,15 @@ fn main() {
     let program = args
         .next()
         .expect(&format!("Usage: {} <program>", exe.to_string_lossy()));
+
     // FIXME(eddyb) try to get this working cross-platform.
-    let status = Command::new(program)
-        .args(args)
-        .env("LD_PRELOAD", find_gloof_dylib())
-        .status()
-        .unwrap();
+    let gloof = find_gloof_dylib();
+    for lib_name in &["libGL.so.1", "libGLX.so.1"] {
+        let lib = gloof.with_file_name(lib_name);
+        let _ = std::fs::remove_file(&lib);
+        std::os::unix::fs::symlink(&gloof, lib).unwrap();
+    }
+    let status = Command::new(program).args(args).status().unwrap();
     if let Some(code) = status.code() {
         process::exit(code);
     }

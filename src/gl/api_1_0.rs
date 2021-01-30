@@ -600,6 +600,7 @@ commands! {
     glLoadIdentity,
     glRotatef(angle: float, x: float, y: float, z: float),
     glTranslatef(x: float, y: float, z: float),
+    glTranslated(x: double, y: double, z: double),
     glFrustum(l: double, r: double, b: double, t: double, n: double, f: double),
 
     glCallList(n: list)
@@ -641,4 +642,54 @@ pub extern "C" fn glEndList() {
         gl.lists.insert(n, Rc::new(list));
         gl.execute_immediately = true;
     });
+}
+
+macro_rules! unimplemented_entry_points {
+    ($($name:ident)*) => {
+        $(#[no_mangle]
+        pub extern "C" fn $name() {
+            unimplemented!(stringify!($name));
+        })*
+    };
+}
+
+unimplemented_entry_points! {
+    // GLU
+    glColor3f
+    glDisable
+    glEvalCoord1f
+    glEvalCoord2f
+    glEvalMesh1
+    glEvalMesh2
+    glEvalPoint1
+    glEvalPoint2
+    glGetFloatv
+    glGetIntegerv
+    glGetString
+    glGetTexLevelParameteriv
+    glMap1f
+    glMap2f
+    glMapGrid1f
+    glMapGrid2d
+    glMapGrid2f
+    glMultMatrixd
+    glMultMatrixf
+    glNormal3fv
+    glOrtho
+    glPixelStorei
+    glPolygonMode
+    glPopAttrib
+    glPushAttrib
+    glScalef
+    glTexCoord2f
+    glTexImage1D
+    glTexImage2D
+    glTexImage3D
+    glVertex2f
+    glVertex2fv
+    glVertex3fv
+
+    // glxgears
+    glDrawBuffer
+    glDeleteLists
 }

@@ -1,5 +1,5 @@
 use crate::gl::api_1_0::{Command, Enum};
-use glam::{DMat4, DVec4, Mat4, Vec3};
+use glam::{DMat4, DVec3, DVec4, Mat4, Vec3};
 use std::f32::consts::PI;
 
 #[derive(Debug, Default)]
@@ -84,6 +84,9 @@ impl State {
                 angle / 180.0 * PI,
             )),
             glTranslatef(x, y, z) => self.matrix_mul(Mat4::from_translation(Vec3::new(x, y, z))),
+            glTranslated(x, y, z) => {
+                self.matrix_mul_double(DMat4::from_translation(DVec3::new(x, y, z)))
+            }
             glFrustum(l, r, b, t, n, f) => self.matrix_mul_double(DMat4::from_cols(
                 DVec4::new(2.0 * n / (r - l), 0.0, 0.0, 0.0),
                 DVec4::new(0.0, 2.0 * n / (t - b), 0.0, 0.0),

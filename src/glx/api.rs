@@ -3,7 +3,7 @@ use libc::{c_char, c_int, c_uchar, c_ulong, free, malloc};
 use std::ffi::{CStr, CString};
 use std::sync::Arc;
 use std::{iter, mem, ptr};
-use x11_dl::glx::{GLXContext, GLXDrawable};
+use x11_dl::glx::{GLXContext, GLXDrawable, GLX_EXTENSIONS, GLX_VENDOR, GLX_VERSION};
 use x11_dl::xlib::{Bool, Display, False, InputOutput, True, XVisualInfo, Xlib};
 
 lazy_static! {
@@ -190,6 +190,30 @@ pub unsafe extern "C" fn glXMakeCurrent(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn glXDestroyContext(_dpy: *mut Display, ctx: GLXContext) {
+    eprintln!("glXDestroyContext(ctx={:#?})", ctx);
+
+    assert!(!ctx.is_null());
+
+    // NOTE(eddyb) this will only drop one reference (the one lent to the user),
+    // *not* the context itself, if it's still in use - this is according to spec:
+    // > If `ctx` is still current to any thread, `ctx` is not destroyed until it
+    // > is no longer current.
+    drop(Arc::from_raw(ctx as *mut super::Context));
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glXQueryVersion(
+    _dpy: *mut Display,
+    _major: *mut c_int,
+    _minor: *mut c_int,
+) -> Bool {
+    eprintln!("glXQueryVersion()");
+
+    False
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn glXQueryExtensionsString(
     _dpy: *mut Display,
     screen: c_int,
@@ -198,7 +222,25 @@ pub unsafe extern "C" fn glXQueryExtensionsString(
 
     eprintln!("glXQueryExtensionsString()");
 
-    b"\0" as *const _ as *const c_char
+    "\0".as_ptr() as *const c_char
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glXGetClientString(_dpy: *mut Display, name: c_int) -> *const c_char {
+    eprintln!("glXGetClientString(name={})", name);
+
+    match name {
+        GLX_VENDOR => "glOOF\0",
+        GLX_VERSION => concat!(
+            env!("CARGO_PKG_VERSION_MAJOR"),
+            ".",
+            env!("CARGO_PKG_VERSION_MINOR"),
+            "\0"
+        ),
+        GLX_EXTENSIONS => "\0",
+        _ => return ptr::null(),
+    }
+    .as_ptr() as *const c_char
 }
 
 #[no_mangle]
@@ -270,4 +312,17 @@ pub unsafe extern "C" fn glXSwapBuffers(dpy: *mut Display, drawable: GLXDrawable
     });
 
     (XLIB.XFlush)(dpy);
+}
+
+macro_rules! unimplemented_entry_points {
+    ($($name:ident)*) => {
+        $(#[no_mangle]
+        pub extern "C" fn $name() {
+            unimplemented!(stringify!($name));
+        })*
+    };
+}
+
+unimplemented_entry_points! {
+    glXQueryDrawable
 }
