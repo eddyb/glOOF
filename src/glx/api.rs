@@ -1,5 +1,5 @@
 use lazy_static::lazy_static;
-use libc::{c_char, c_int, c_uchar, free, malloc};
+use libc::{c_char, c_int, c_uchar, c_ulong, free, malloc};
 use std::ffi::{CStr, CString};
 use std::sync::Arc;
 use std::{iter, mem, ptr};
@@ -228,7 +228,7 @@ pub unsafe extern "C" fn glXSwapBuffers(dpy: *mut Display, drawable: GLXDrawable
     let gc = (XLIB.XCreateGC)(
         dpy,
         drawable,
-        GCForeground as u64,
+        GCForeground as c_ulong,
         &XGCValues {
             foreground: 0xffffff,
             ..mem::zeroed()
