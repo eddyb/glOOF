@@ -207,7 +207,7 @@ pub unsafe extern "C" fn glXGetProcAddressARB(
 ) -> Option<unsafe extern "C" fn()> {
     let proc_name = CStr::from_ptr(proc_name as *const c_char).to_str().unwrap();
 
-    unimplemented!("glXQueryExtensionsString({:?})", proc_name);
+    unimplemented!("glXGetProcAddressARB({:?})", proc_name);
 }
 
 #[no_mangle]
