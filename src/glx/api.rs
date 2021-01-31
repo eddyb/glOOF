@@ -172,15 +172,7 @@ pub unsafe extern "C" fn glXChooseVisual(
     } else {
         visual_info.write(XVisualInfo {
             visual: (XLIB.XDefaultVisual)(dpy, 0),
-            visualid: 0,
-            screen: 0,
-            depth: 0,
-            class: 0,
-            red_mask: 0,
-            green_mask: 0,
-            blue_mask: 0,
-            colormap_size: 0,
-            bits_per_rgb: 0,
+            ..mem::zeroed()
         });
     }
     visual_info
