@@ -231,12 +231,7 @@ pub unsafe extern "C" fn glXGetClientString(_dpy: *mut Display, name: c_int) -> 
 
     match name {
         GLX_VENDOR => "glOOF\0",
-        GLX_VERSION => concat!(
-            env!("CARGO_PKG_VERSION_MAJOR"),
-            ".",
-            env!("CARGO_PKG_VERSION_MINOR"),
-            "\0"
-        ),
+        GLX_VERSION => concat!(version_str!(major.minor), "\0"),
         GLX_EXTENSIONS => "\0",
         _ => return ptr::null(),
     }

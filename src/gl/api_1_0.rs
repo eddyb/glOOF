@@ -1,6 +1,7 @@
 use derive_try_from_primitive::TryFromPrimitive;
 use smallvec::SmallVec;
 use std::convert::{TryFrom, TryInto};
+use std::ptr;
 use std::sync::Arc;
 
 #[allow(non_camel_case_types)]
@@ -644,6 +645,20 @@ pub extern "C" fn glEndList() {
     });
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn glGetString(name: Enum) -> *const u8 {
+    eprintln!("glGetString(name={:?})", name);
+
+    use Enum::*;
+    match name {
+        VENDOR | RENDERER => "glOOF\0",
+        VERSION => concat!(version_str!(major.minor), "\0"),
+        EXTENSIONS => "\0",
+        _ => return ptr::null(),
+    }
+    .as_ptr()
+}
+
 macro_rules! unimplemented_entry_points {
     ($($name:ident)*) => {
         $(#[no_mangle]
@@ -665,7 +680,6 @@ unimplemented_entry_points! {
     glEvalPoint2
     glGetFloatv
     glGetIntegerv
-    glGetString
     glGetTexLevelParameteriv
     glMap1f
     glMap2f
