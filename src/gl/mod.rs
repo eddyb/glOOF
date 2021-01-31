@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use std::cell::Cell;
-use std::rc::Rc;
+use std::sync::Arc;
 
 pub mod api_1_0;
 mod debug;
@@ -17,7 +17,7 @@ pub struct Context {
 
     // Display lists.
     pub first_unused_list: u32,
-    pub lists: IndexMap<u32, Rc<DisplayList>>,
+    pub lists: IndexMap<u32, Arc<DisplayList>>,
     pub compile_list: Option<(u32, DisplayList)>,
     pub execute_immediately: bool,
 

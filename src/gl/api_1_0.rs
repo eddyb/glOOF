@@ -1,7 +1,7 @@
 use derive_try_from_primitive::TryFromPrimitive;
 use smallvec::SmallVec;
 use std::convert::{TryFrom, TryInto};
-use std::rc::Rc;
+use std::sync::Arc;
 
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone, Debug, TryFromPrimitive)]
@@ -515,7 +515,7 @@ macro_rules! commands {
             .collect()
     };
 
-    (@type list) => {Rc<super::DisplayList>};
+    (@type list) => {Arc<super::DisplayList>};
     (@ffi_type list) => {u32};
     (@from_ffi($gl:ident) $name:ident: list) => {$gl.lists[&$name].clone()};
 
@@ -639,7 +639,7 @@ pub extern "C" fn glEndList() {
     super::Context::with("glEndList", |gl| {
         // FIXME(eddyb) report error
         let (n, list) = gl.compile_list.take().unwrap();
-        gl.lists.insert(n, Rc::new(list));
+        gl.lists.insert(n, Arc::new(list));
         gl.execute_immediately = true;
     });
 }

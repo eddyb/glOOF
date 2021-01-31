@@ -13,11 +13,17 @@ enum State {
 
 thread_local!(static CURRENT_CX: Cell<Option<Arc<Context>>> = Cell::new(None));
 
+/// Enforce that `T` is `Send`, guaranteeing it even when it may only be relied
+/// upon in `unsafe` code that wouldn't have the necessary bounds itself.
+fn assert_send<T: Send>(x: T) -> T {
+    x
+}
+
 impl Context {
     fn new() -> Arc<Self> {
-        Arc::new(Self(Mutex::new(State::Inactive(Box::new(
+        assert_send(Arc::new(Self(Mutex::new(State::Inactive(Box::new(
             crate::gl::Context::new(),
-        )))))
+        ))))))
     }
 
     fn get_current() -> Option<Arc<Context>> {
