@@ -3,8 +3,11 @@ use libc::{c_char, c_int, c_uchar, c_ulong, free, malloc};
 use std::ffi::{CStr, CString};
 use std::sync::Arc;
 use std::{iter, mem, ptr};
-use x11_dl::glx::{GLXContext, GLXDrawable, GLX_EXTENSIONS, GLX_VENDOR, GLX_VERSION};
-use x11_dl::xlib::{Bool, Display, False, InputOutput, True, XVisualInfo, Xlib};
+use x11_dl::glx::{
+    GLXContext, GLXDrawable, GLXFBConfig, GLX_DONT_CARE, GLX_EXTENSIONS, GLX_NONE, GLX_RGBA_BIT,
+    GLX_VENDOR, GLX_VERSION, GLX_WINDOW_BIT,
+};
+use x11_dl::xlib::{Bool, Display, False, InputOutput, Success, True, XVisualInfo, Xlib};
 
 lazy_static! {
     static ref XLIB: Xlib = Xlib::open().unwrap();
@@ -55,19 +58,50 @@ pub unsafe extern "C" fn glXQueryExtensionsString(
     "\0".as_ptr() as *const c_char
 }
 
-macro_rules! visual_attribs {
-    (@type bool) => {bool};
-    (@type int) => {i32};
-    (@parse($next:expr) $name:ident: bool) => {Self::$name(true)};
-    (@parse($next:expr) $name:ident: int) => {Self::$name($next())};
-    ($($name:ident: $ty:ident),* $(,)?) => {
+macro_rules! attribs {
+    (@type(Visual) bool) => {bool};
+    (@type(FBConfig) bool) => {Option<bool>};
+    (@type($mode:ident) int) => {i32};
+    (@type(FBConfig) bitmask) => {u32};
+    (@type(FBConfig) enum) => {u32};
+
+    (@parse(Visual, $next:expr) bool) => {true};
+    (@parse(FBConfig, $next:expr) bool) => {{
+        #![allow(non_upper_case_globals)]
+        match $next() {
+            GLX_DONT_CARE => None,
+            False => Some(false),
+            True => Some(true),
+            value => panic!("FBConfigAttrib::parse: invalid bool value {}", value),
+        }
+    }};
+    (@parse($mode:ident, $next:expr) int) => {$next()};
+    (@parse(FBConfig, $next:expr) bitmask) => {$next() as u32};
+    (@parse(FBConfig, $next:expr) enum) => {$next() as u32};
+
+    (@define($mode:ident, enum $Attrib:ident, struct $Attribs:ident) {
+        $($name:ident: $ty:ident $(= $default:expr)?),* $(,)?
+    }) => {
         #[allow(non_camel_case_types)]
         #[derive(Copy, Clone, Debug)]
-        enum VisualAttrib {
-            $($name(visual_attribs!(@type $ty))),*
+        enum $Attrib {
+            $($name(attribs!(@type($mode) $ty))),*
         }
-        impl VisualAttrib {
-            unsafe fn parse_list(mut list: *mut c_int) -> impl Iterator<Item = Self> {
+        impl $Attrib {
+            fn name(&self) -> &'static str {
+                match self {
+                    $(Self::$name(_) => stringify!($name)),*
+                }
+            }
+
+            fn parse(attrib: c_int, next: impl FnOnce() -> c_int) -> Self {
+                match attrib {
+                    $(x11_dl::glx::$name => Self::$name(attribs!(@parse($mode, next) $ty)),)*
+                    attrib => panic!(concat!(stringify!($Attrib), "::parse: invalid attribute {}"), attrib),
+                }
+            }
+
+            unsafe fn parse_list(mut list: *const c_int) -> impl Iterator<Item = Self> {
                 iter::from_fn(move || {
                     if *list == 0 {
                         return None;
@@ -77,68 +111,137 @@ macro_rules! visual_attribs {
                         list = list.add(1);
                         attrib
                     };
-                    Some(match next() {
-                        $(x11_dl::glx::$name => visual_attribs!(@parse(next) $name: $ty),)*
-                        attrib => panic!("VisualAttrib::parse_list: invalid attribute {}", attrib),
-                    })
+                    Some(Self::parse(next(), next))
                 })
-
             }
         }
 
         #[allow(non_snake_case)]
         #[derive(Copy, Clone, Debug)]
-        struct VisualAttribs {
-            $($name: visual_attribs!(@type $ty)),*
+        struct $Attribs {
+            $($name: attribs!(@type($mode) $ty)),*
         }
-        impl Default for VisualAttribs {
+        impl Default for $Attribs {
             fn default() -> Self {
-                Self {
-                    GLX_USE_GL: true,
-                    ..Self {
-                        $($name: Default::default()),*
-                    }
-                }
+                let mut default = Self {
+                    $($name: Default::default()),*
+                };
+                default.extend([
+                    $($($Attrib::parse(x11_dl::glx::$name, || $default),)?)*
+                ].iter().copied());
+                default
             }
         }
-        impl Extend<VisualAttrib> for VisualAttribs {
-            fn extend<I: IntoIterator<Item = VisualAttrib>>(&mut self, iter: I) {
+        impl Extend<$Attrib> for $Attribs {
+            fn extend<I: IntoIterator<Item = $Attrib>>(&mut self, iter: I) {
                 for attrib in iter {
                     match attrib {
-                        $(VisualAttrib::$name(x) => self.$name = x),*
+                        $($Attrib::$name(x) => self.$name = x),*
                     }
                 }
             }
         }
-        impl iter::FromIterator<VisualAttrib> for VisualAttribs {
-            fn from_iter<I: IntoIterator<Item = VisualAttrib>>(iter: I) -> Self {
+        impl iter::FromIterator<$Attrib> for $Attribs {
+            fn from_iter<I: IntoIterator<Item = $Attrib>>(iter: I) -> Self {
                 let mut attribs = Self::default();
                 attribs.extend(iter);
                 attribs
             }
         }
     };
+
+    (
+        Visual { $($visual_name:ident: $visual_ty:ident $(= $visual_default:expr)?),* $(,)? }
+        VisualAndFBConfig { $($common_name:ident: $common_ty:ident $(= $common_default:expr)?),* $(,)? }
+        FBConfig { $($fbconfig_name:ident: $fbconfig_ty:ident $(= $fbconfig_default:expr)?),* $(,)? }
+    ) => {
+        attribs!(@define(Visual, enum VisualAttrib, struct VisualAttribs) {
+            $($visual_name: $visual_ty $( = $visual_default)?,)*
+            $($common_name: $common_ty $( = $common_default)?,)*
+        });
+        attribs!(@define(FBConfig, enum FBConfigAttrib, struct FBConfigAttribs) {
+            $($common_name: $common_ty $( = $common_default)?,)*
+            $($fbconfig_name: $fbconfig_ty $( = $fbconfig_default)?,)*
+        });
+    };
 }
 
-visual_attribs! {
-    GLX_USE_GL: bool,
-    GLX_BUFFER_SIZE: int,
-    GLX_LEVEL: int,
-    GLX_RGBA: bool,
-    GLX_DOUBLEBUFFER: bool,
-    GLX_STEREO: bool,
-    GLX_AUX_BUFFERS: int,
-    GLX_RED_SIZE: int,
-    GLX_GREEN_SIZE: int,
-    GLX_BLUE_SIZE: int,
-    GLX_ALPHA_SIZE: int,
-    GLX_DEPTH_SIZE: int,
-    GLX_STENCIL_SIZE: int,
-    GLX_ACCUM_RED_SIZE: int,
-    GLX_ACCUM_GREEN_SIZE: int,
-    GLX_ACCUM_BLUE_SIZE: int,
-    GLX_ACCUM_ALPHA_SIZE: int,
-    GLX_FBCONFIG_ID: int,
+// FIXME(eddyb) replace `GLX_DONT_CARE` with `Option`?
+attribs! {
+    Visual {
+        GLX_USE_GL: bool = True,
+        GLX_RGBA: bool,
+
+        // NOTE(eddyb) common but `bool` defaults are different:
+        // `false` for `Visual` vs `None::<bool>` for `FBConfig`.
+        GLX_STEREO: bool,
+    }
+
+    VisualAndFBConfig {
+        // NOTE(eddyb) allowed for Visual but ignored.
+        GLX_FBCONFIG_ID: int = GLX_DONT_CARE,
+
+        GLX_BUFFER_SIZE: int,
+        GLX_LEVEL: int,
+        GLX_DOUBLEBUFFER: bool,
+        GLX_AUX_BUFFERS: int,
+        GLX_RED_SIZE: int,
+        GLX_GREEN_SIZE: int,
+        GLX_BLUE_SIZE: int,
+        GLX_ALPHA_SIZE: int,
+        GLX_DEPTH_SIZE: int,
+        GLX_STENCIL_SIZE: int,
+        GLX_ACCUM_RED_SIZE: int,
+        GLX_ACCUM_GREEN_SIZE: int,
+        GLX_ACCUM_BLUE_SIZE: int,
+        GLX_ACCUM_ALPHA_SIZE: int,
+    }
+
+    FBConfig {
+        // NOTE(eddyb) common but `bool` defaults are different:
+        // `false` for `Visual` vs `None::<bool>` for `FBConfig`.
+        GLX_STEREO: bool = False,
+
+        // FIXME(eddyb) encode the information in the comments below, into types.
+        // bitmask { GLX_RGBA_BIT | GLX_COLOR_INDEX_BIT }
+        GLX_RENDER_TYPE: bitmask = GLX_RGBA_BIT,
+        // bitmask { GLX_WINDOW_BIT | GLX_PIXMAP_BIT | GLX_PBUFFER_BIT }
+        GLX_DRAWABLE_TYPE: bitmask = GLX_WINDOW_BIT,
+        GLX_X_RENDERABLE: bool = GLX_DONT_CARE,
+        GLX_X_VISUAL_TYPE: int = GLX_DONT_CARE,
+        // enum { GLX_NONE, GLX_SLOW_CONFIG, GLX_NON_CONFORMANT_CONFIG }
+        GLX_CONFIG_CAVEAT: enum = GLX_DONT_CARE,
+        // enum { GLX_NONE, GLX_TRANSPARENT_RGB, GLX_TRANSPARENT_INDEX }
+        GLX_TRANSPARENT_TYPE: enum = GLX_NONE,
+        GLX_TRANSPARENT_INDEX_VALUE: int = GLX_DONT_CARE,
+        GLX_TRANSPARENT_RED_VALUE: int = GLX_DONT_CARE,
+        GLX_TRANSPARENT_GREEN_VALUE: int = GLX_DONT_CARE,
+        GLX_TRANSPARENT_BLUE_VALUE: int = GLX_DONT_CARE,
+        GLX_TRANSPARENT_ALPHA_VALUE: int = GLX_DONT_CARE,
+    }
+}
+
+const COLOR_DEPTH: c_int = 24;
+const COLOR_CHANNEL_DEPTH: c_int = 8;
+
+unsafe fn default_visual_info(dpy: *mut Display) -> *mut XVisualInfo {
+    let visual_info = malloc(mem::size_of::<XVisualInfo>()) as *mut XVisualInfo;
+
+    // HACK(eddyb) `XMatchVisualInfo` returns 0 (failure) for some reason.
+    if false {
+        if (XLIB.XMatchVisualInfo)(dpy, 0, COLOR_DEPTH, InputOutput, visual_info) == 0 {
+            free(visual_info as *mut _);
+            return ptr::null_mut();
+        }
+        eprintln!("visual_info = {:#?}", *visual_info);
+    } else {
+        visual_info.write(XVisualInfo {
+            visual: (XLIB.XDefaultVisual)(dpy, 0),
+            depth: COLOR_DEPTH,
+            ..mem::zeroed()
+        });
+    }
+    visual_info
 }
 
 #[no_mangle]
@@ -160,22 +263,147 @@ pub unsafe extern "C" fn glXChooseVisual(
         VisualAttrib::parse_list(attrib_list).collect::<VisualAttribs>()
     );
 
-    let visual_info = malloc(mem::size_of::<XVisualInfo>()) as *mut XVisualInfo;
+    default_visual_info(dpy)
+}
 
-    // HACK(eddyb) `XMatchVisualInfo` returns 0 (failure) for some reason.
-    if false {
-        if (XLIB.XMatchVisualInfo)(dpy, 0, 24, InputOutput, visual_info) == 0 {
-            free(visual_info as *mut _);
-            return ptr::null_mut();
-        }
-        eprintln!("visual_info = {:#?}", *visual_info);
-    } else {
-        visual_info.write(XVisualInfo {
-            visual: (XLIB.XDefaultVisual)(dpy, 0),
-            ..mem::zeroed()
-        });
+#[no_mangle]
+pub unsafe extern "C" fn glXGetConfig(
+    _dpy: *mut Display,
+    visual: *mut XVisualInfo,
+    attrib: c_int,
+    _value: *mut c_int,
+) -> c_int {
+    // FIXME(eddyb) make a separate `enum` for an attrib w/o values.
+    let attrib = VisualAttrib::parse(attrib, || 0);
+
+    unimplemented!(
+        "glXGetConfig(visual={:#?}, attrib={})",
+        *visual,
+        attrib.name()
+    );
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glXGetFBConfigs(
+    _dpy: *mut Display,
+    screen: c_int,
+    nelements: *mut c_int,
+) -> *mut GLXFBConfig {
+    assert_eq!(screen, 0);
+
+    eprintln!("glXGetFBConfigs()");
+
+    let fb_config_array = [ptr::null_mut()];
+
+    let fb_configs = malloc(mem::size_of_val(&fb_config_array)) as *mut [GLXFBConfig; 1];
+    fb_configs.write(fb_config_array);
+    *nelements = fb_config_array.len() as c_int;
+    fb_configs as *mut GLXFBConfig
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glXChooseFBConfig(
+    _dpy: *mut Display,
+    screen: c_int,
+    attrib_list: *const c_int,
+    nelements: *mut c_int,
+) -> *mut GLXFBConfig {
+    assert_eq!(screen, 0);
+
+    eprintln!("glXChooseFBConfig(attrib_list=[");
+    for attrib in FBConfigAttrib::parse_list(attrib_list) {
+        eprintln!("    {:?},", attrib);
     }
-    visual_info
+    eprintln!("])");
+
+    eprintln!(
+        "attribs = {:#?}",
+        FBConfigAttrib::parse_list(attrib_list).collect::<FBConfigAttribs>()
+    );
+
+    let fb_config_array = [ptr::null_mut()];
+
+    let fb_configs = malloc(mem::size_of_val(&fb_config_array)) as *mut [GLXFBConfig; 1];
+    fb_configs.write(fb_config_array);
+    *nelements = fb_config_array.len() as c_int;
+    fb_configs as *mut GLXFBConfig
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glXGetFBConfigAttrib(
+    _dpy: *mut Display,
+    config: GLXFBConfig,
+    attribute: c_int,
+    value: *mut c_int,
+) -> c_int {
+    assert_eq!(config, ptr::null_mut());
+
+    // FIXME(eddyb) make a separate `enum` for an attrib w/o values.
+    let attribute = FBConfigAttrib::parse(attribute, || 0);
+
+    eprintln!("glXGetFBConfigAttrib(attribute={})", attribute.name());
+
+    *value = match attribute {
+        // HACK(eddyb) hardcode some values for our sole `GLXFBConfig`.
+        FBConfigAttrib::GLX_FBCONFIG_ID(_) => 0,
+        FBConfigAttrib::GLX_BUFFER_SIZE(_) => COLOR_DEPTH,
+        FBConfigAttrib::GLX_DOUBLEBUFFER(_) => True,
+        FBConfigAttrib::GLX_STEREO(_) => False,
+        FBConfigAttrib::GLX_AUX_BUFFERS(_) => 0,
+        FBConfigAttrib::GLX_RED_SIZE(_)
+        | FBConfigAttrib::GLX_GREEN_SIZE(_)
+        | FBConfigAttrib::GLX_BLUE_SIZE(_)
+        | FBConfigAttrib::GLX_ALPHA_SIZE(_) => COLOR_CHANNEL_DEPTH,
+        FBConfigAttrib::GLX_DEPTH_SIZE(_) => 16,
+        FBConfigAttrib::GLX_STENCIL_SIZE(_) => 0,
+        FBConfigAttrib::GLX_ACCUM_RED_SIZE(_)
+        | FBConfigAttrib::GLX_ACCUM_GREEN_SIZE(_)
+        | FBConfigAttrib::GLX_ACCUM_BLUE_SIZE(_)
+        | FBConfigAttrib::GLX_ACCUM_ALPHA_SIZE(_) => 0,
+        FBConfigAttrib::GLX_RENDER_TYPE(_) => GLX_RGBA_BIT,
+        FBConfigAttrib::GLX_DRAWABLE_TYPE(_) => GLX_WINDOW_BIT,
+
+        _ => unimplemented!(),
+    };
+
+    Success as c_int
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glXGetVisualFromFBConfig(
+    dpy: *mut Display,
+    config: GLXFBConfig,
+) -> *mut XVisualInfo {
+    assert_eq!(config, ptr::null_mut());
+
+    eprintln!("glXGetVisualFromFBConfig()");
+
+    default_visual_info(dpy)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glXCreateWindow(
+    _dpy: *mut Display,
+    config: GLXFBConfig,
+    win: c_ulong,
+    attrib_list: *const c_int,
+) -> c_ulong {
+    assert_eq!(config, ptr::null_mut());
+    if !attrib_list.is_null() {
+        assert_eq!(*attrib_list, 0);
+    }
+
+    eprintln!("glXCreateWindow(win={:#x})", win);
+
+    // HACK(eddyb) don't bother creating a child window inside `win`.
+    win
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glXDestroyWindow(_dpy: *mut Display, win: c_ulong) {
+    eprintln!("glXDestroyWindow(win={:#x})", win);
+
+    // NOTE(eddyb) don't have to do anything right now, see `glXCreateWindow`.
 }
 
 #[no_mangle]
