@@ -10,6 +10,51 @@ lazy_static! {
     static ref XLIB: Xlib = Xlib::open().unwrap();
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn glXGetProcAddressARB(
+    proc_name: *const c_uchar,
+) -> Option<unsafe extern "C" fn()> {
+    let proc_name = CStr::from_ptr(proc_name as *const c_char).to_str().unwrap();
+
+    unimplemented!("glXGetProcAddressARB({:?})", proc_name);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glXQueryVersion(
+    _dpy: *mut Display,
+    _major: *mut c_int,
+    _minor: *mut c_int,
+) -> Bool {
+    eprintln!("glXQueryVersion()");
+
+    False
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glXGetClientString(_dpy: *mut Display, name: c_int) -> *const c_char {
+    eprintln!("glXGetClientString(name={})", name);
+
+    match name {
+        GLX_VENDOR => "glOOF\0",
+        GLX_VERSION => concat!(version_str!(major.minor), "\0"),
+        GLX_EXTENSIONS => "\0",
+        _ => return ptr::null(),
+    }
+    .as_ptr() as *const c_char
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glXQueryExtensionsString(
+    _dpy: *mut Display,
+    screen: c_int,
+) -> *const c_char {
+    assert_eq!(screen, 0);
+
+    eprintln!("glXQueryExtensionsString()");
+
+    "\0".as_ptr() as *const c_char
+}
+
 macro_rules! visual_attribs {
     (@type bool) => {bool};
     (@type int) => {i32};
@@ -200,51 +245,6 @@ pub unsafe extern "C" fn glXDestroyContext(_dpy: *mut Display, ctx: GLXContext) 
     // > If `ctx` is still current to any thread, `ctx` is not destroyed until it
     // > is no longer current.
     drop(Arc::from_raw(ctx as *mut super::Context));
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn glXQueryVersion(
-    _dpy: *mut Display,
-    _major: *mut c_int,
-    _minor: *mut c_int,
-) -> Bool {
-    eprintln!("glXQueryVersion()");
-
-    False
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn glXQueryExtensionsString(
-    _dpy: *mut Display,
-    screen: c_int,
-) -> *const c_char {
-    assert_eq!(screen, 0);
-
-    eprintln!("glXQueryExtensionsString()");
-
-    "\0".as_ptr() as *const c_char
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn glXGetClientString(_dpy: *mut Display, name: c_int) -> *const c_char {
-    eprintln!("glXGetClientString(name={})", name);
-
-    match name {
-        GLX_VENDOR => "glOOF\0",
-        GLX_VERSION => concat!(version_str!(major.minor), "\0"),
-        GLX_EXTENSIONS => "\0",
-        _ => return ptr::null(),
-    }
-    .as_ptr() as *const c_char
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn glXGetProcAddressARB(
-    proc_name: *const c_uchar,
-) -> Option<unsafe extern "C" fn()> {
-    let proc_name = CStr::from_ptr(proc_name as *const c_char).to_str().unwrap();
-
-    unimplemented!("glXGetProcAddressARB({:?})", proc_name);
 }
 
 #[no_mangle]
