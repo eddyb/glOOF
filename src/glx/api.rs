@@ -19,23 +19,89 @@ pub unsafe extern "C" fn glXGetProcAddressARB(
 ) -> Option<unsafe extern "C" fn()> {
     let proc_name = CStr::from_ptr(proc_name as *const c_char).to_str().unwrap();
 
-    unimplemented!("glXGetProcAddressARB({:?})", proc_name);
+    eprintln!("glXGetProcAddressARB({:?})", proc_name);
+
+    macro_rules! export {
+        ($($name:ident)*) => {
+            match proc_name {
+                $(stringify!($name) => Some(mem::transmute($name as usize)),)*
+                _ => None
+            }
+        };
+    }
+    // FIXME(eddyb) DRY with the actual entry-point definitions
+    export! {
+        glXQueryVersion
+        glXGetClientString
+        glXQueryServerString
+        glXQueryExtensionsString
+        glXChooseVisual
+        glXGetConfig
+        glXGetFBConfigs
+        glXChooseFBConfig
+        glXGetFBConfigAttrib
+        glXGetVisualFromFBConfig
+        glXCreateWindow
+        glXDestroyWindow
+        glXCreateContext
+        glXIsDirect
+        glXMakeCurrent
+        glXDestroyContext
+        glXSwapBuffers
+
+        // glxgears
+        glXQueryDrawable
+
+        // wine
+        glXCopyContext
+        glXCreateNewContext
+        glXCreatePbuffer
+        glXCreatePixmap
+        glXDestroyPbuffer
+        glXDestroyPixmap
+        glXGetCurrentContext
+        glXGetCurrentDrawable
+        glXMakeContextCurrent
+    }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn glXQueryVersion(
     _dpy: *mut Display,
-    _major: *mut c_int,
-    _minor: *mut c_int,
+    major: *mut c_int,
+    minor: *mut c_int,
 ) -> Bool {
     eprintln!("glXQueryVersion()");
 
-    False
+    // wine needs either GLX 1.3 or some vendor extensions.
+    *major = 1;
+    *minor = 3;
+
+    True
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn glXGetClientString(_dpy: *mut Display, name: c_int) -> *const c_char {
     eprintln!("glXGetClientString(name={})", name);
+
+    match name {
+        GLX_VENDOR => "glOOF\0",
+        GLX_VERSION => concat!(version_str!(major.minor), "\0"),
+        GLX_EXTENSIONS => "\0",
+        _ => return ptr::null(),
+    }
+    .as_ptr() as *const c_char
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn glXQueryServerString(
+    _dpy: *mut Display,
+    screen: c_int,
+    name: c_int,
+) -> *const c_char {
+    assert_eq!(screen, 0);
+
+    eprintln!("glXQueryServerString(name={})", name);
 
     match name {
         GLX_VENDOR => "glOOF\0",
@@ -425,6 +491,15 @@ pub unsafe extern "C" fn glXCreateContext(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn glXIsDirect(_dpy: *mut Display, ctx: GLXContext) -> Bool {
+    eprintln!("glXIsDirect(ctx={:#?})", ctx);
+
+    assert!(!ctx.is_null());
+
+    True
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn glXMakeCurrent(
     dpy: *mut Display,
     drawable: GLXDrawable,
@@ -481,6 +556,7 @@ pub unsafe extern "C" fn glXSwapBuffers(dpy: *mut Display, drawable: GLXDrawable
         }
     }
 
+    (XLIB.XSetWindowBackground)(dpy, drawable, 0);
     (XLIB.XClearWindow)(dpy, drawable);
     let gc = (XLIB.XCreateGC)(
         dpy,
@@ -539,5 +615,17 @@ macro_rules! unimplemented_entry_points {
 }
 
 unimplemented_entry_points! {
+    // glxgears
     glXQueryDrawable
+
+    // wine
+    glXCopyContext
+    glXCreateNewContext
+    glXCreatePbuffer
+    glXCreatePixmap
+    glXDestroyPbuffer
+    glXDestroyPixmap
+    glXGetCurrentContext
+    glXGetCurrentDrawable
+    glXMakeContextCurrent
 }
